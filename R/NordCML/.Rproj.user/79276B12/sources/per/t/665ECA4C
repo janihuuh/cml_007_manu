@@ -1,0 +1,22 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1604776233153.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "1556327354",
+    "id" : "665ECA4C",
+    "lastKnownWriteTime" : 1604937192,
+    "last_content_update" : 1604937192280,
+    "path" : "~/Dropbox (HRUH)/NordCML/src/R/run_plotManuscriptOverall.R",
+    "project_path" : null,
+    "properties" : {
+        "cursorPosition" : "785,0",
+        "scrollLine" : "0"
+    },
+    "relative_order" : 3,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

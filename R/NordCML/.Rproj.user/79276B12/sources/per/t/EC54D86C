@@ -1,0 +1,22 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1604778522865.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "72185921",
+    "id" : "EC54D86C",
+    "lastKnownWriteTime" : 1604779890,
+    "last_content_update" : 1604779890312,
+    "path" : "~/Dropbox (HRUH)/NordCML/src/R/run_plotManuscriptDasa.R",
+    "project_path" : null,
+    "properties" : {
+        "cursorPosition" : "25,0",
+        "scrollLine" : "0"
+    },
+    "relative_order" : 6,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

@@ -1,0 +1,328 @@
+
+dir.create("results/manuscript/ifna/")
+
+## Olink
+olink_df <- fread("results/manuscript/olink_clean.txt") %>% dplyr::select(-V1) 
+olink_ifna_df <- olink_df %>% melt(id = c("name", "timepoint")) %>% filter(timepoint %in% c("3mo", "12mo")) %>%   mutate(fill = ifelse(timepoint == "3mo", "diagnosis", "dasa+IFNa")) %>% 
+  mutate(fill = ifelse(timepoint %in% c("12mo", "24mo"), "ifna", fill)) %>% mutate(type = "olink")
+
+## Compare before and after ifna
+facs_12mo <- fread("results/manuscript/facs_12mo_df.txt") 
+
+ifna_facs_df <- facs_12mo %>% melt(id = c("timepoint","Study.nro","FM", "HRUH")) %>% 
+  mutate(fill = ifelse(timepoint == "3mo", "dasa", "dasa+IFNa")) %>% 
+  filter(timepoint %in% c("3mo", "12mo")) %>% dplyr::select(-Study.nro, -HRUH) %>% dplyr::rename(name = FM) %>% dplyr::select(name,timepoint,variable,value,fill) %>% mutate(type = "facs")
+
+ifna_facs_df <- ifna_facs_df %>% filter(!is.na(name))
+ifna_df <- rbind(olink_ifna_df, ifna_facs_df)
+
+p <- ifna_df %>% ggplot(aes(timepoint, value, fill = fill)) + geom_violin(draw_quantiles = 0.5) + ggpubr::stat_compare_means(label = "p.signif") + facet_wrap(~variable) + # ggsignif::geom_signif(comparisons = list(c("3mo", "12mo"))) +
+  geom_vline(xintercept = 1.5, linetype = "dotted") + geom_vline(xintercept = 2.5, linetype = "dotted") + ggpubr::rotate_x_text(angle = 45) + scale_fill_manual(values = getPalette3(4)) + geom_jitter(size = 0.5)
+ggsave(plot = p, "results/manuscript/ifna/violin_overall.pdf", width = 12, height = 12)
+
+
+var_df <- ifna_df %>% group_by(variable, type) %>% summarise(n = n()) %>% dplyr::select(-n)
+p.df <- lapply(unique(ifna_df$variable), FUN = function(x){
+  message(x)
+  y <- ifna_df %>% filter(variable == x)
+  if(length(unique(y$timepoint)) == 2){
+    median.x = y %>% filter(timepoint == "3mo") %>% pull(value) %>% median(na.rm = T)
+    median.y = y %>% filter(timepoint == "12mo") %>% pull(value) %>% median(na.rm = T)
+    wilcox.test(value~timepoint, data = y) %>% broom::tidy() %>% mutate(variable = x, median.3m = median.x, median.12m = median.y, dir = ifelse(log2(median.x/median.y) < 0, "up", "down"))
+  }
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) %>% left_join(var_df)
+fwrite(p.df, "results/manuscript/ifna/ifna_p_df.txt", sep = "\t", quote = F, row.names = F)
+xlsx::write.xlsx(p.df, "results/manuscript/ifna/ifna_p_df.xlsx", col.names = TRUE, row.names = TRUE, append = FALSE)
+
+p.df %>% filter(p.adj < 0.25) %>% 
+  ggplot(aes(reorder(variable,-log10(p.adj)), -log10(p.adj), fill = type)) + geom_bar(stat = "identity") + coord_flip() + labs(x = "") + facet_wrap(~dir, scales = "free_y")
+ggsave("results/manuscript/ifna/bar_sigf.pdf", width = 5, height = 6)
+
+p.df %>% filter(type == "facs") %>% 
+  # filter(variable != "NKCD27") %>% 
+  mutate(p.adj = p.adjust(p.value, method = "BH")) %>% 
+  mutate(col = ifelse(p.adj < 0.05, dir, "no")) %>% 
+  mutate(dir = plyr::revalue(dir, replace = c("down" = "up in dasa", "up" = "up in on dasa+ifna"))) %>% 
+  ggplot(aes(reorder(variable,-log10(p.adj)), -log10(p.adj), fill = col)) + 
+  # geom_bar(stat = "identity") + 
+  geom_segment(aes(x = reorder(variable,-log10(p.adj)), xend = reorder(variable,-log10(p.adj)), y=0, yend=-log10(p.adj)), color = "gray30") + geom_point(shape = 21, size = 5) +
+  coord_flip() + labs(x = "") + facet_wrap(~dir) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dotted") + facets_nice + scale_fill_manual(values = c(getPalette(8)[2], "lightgrey", getPalette(8)[1])) + theme(legend.position = "none")
+ggsave("results/manuscript/ifna/loliplot_facs_sigf.pdf", width = 5.5, height = 6)
+
+
+p.df %>% filter(type == "olink") %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% 
+  mutate(col = ifelse(p.adj < 0.05, dir, "no")) %>% 
+  mutate(dir = plyr::revalue(dir, replace = c("down" = "up in dasa", "up" = "up in on dasa+ifna"))) %>% 
+  ggplot(aes(reorder(variable,-log10(p.adj)), -log10(p.adj), fill = col)) + 
+  # geom_bar(stat = "identity") + 
+  geom_segment(aes(x = reorder(variable,-log10(p.adj)), xend = reorder(variable,-log10(p.adj)), y=0, yend=-log10(p.adj)), color = "gray30") + geom_point(shape = 21, size = 5) +
+  coord_flip() + labs(x = "") + facet_wrap(~dir) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dotted") + facets_nice + scale_fill_manual(values = c(getPalette(8)[2], "lightgrey", getPalette(8)[1])) + theme(legend.position = "none")
+ggsave("results/manuscript/ifna/loliplot_olink_sigf.pdf", width = 5.5, height = 9)
+
+
+
+
+
+sigf_variables <- p.df %>% filter(p.adj < 0.1) %>% pull(variable)
+
+ifna_df %>% filter(variable %in% sigf_variables) %>% left_join(p.df %>% filter(p.adj < 0.05)) %>% 
+  mutate(timepoint = factor(as.character(timepoint), levels = c("3mo", "12mo"))) %>% 
+  left_join(var_df) %>% filter(type == "facs") %>% 
+  ggplot(aes(timepoint, value, fill = fill)) + geom_violin(draw_quantiles = 0.5) + ggpubr::stat_compare_means(label = "p.signif") + 
+  # facet_wrap(~reorder(variable, p.adj), scales = "free_y") + # ggsignif::geom_signif(comparisons = list(c("3mo", "12mo"))) +
+  facet_wrap(~variable, scales = "free_y") + # ggsignif::geom_signif(comparisons = list(c("3mo", "12mo"))) +
+  geom_vline(xintercept = 1.5, linetype = "dotted") + geom_vline(xintercept = 2.5, linetype = "dotted") + ggpubr::rotate_x_text(angle = 45) + scale_fill_manual(values = getPalette3(4)) + geom_jitter(size = 0.5) + facets_nice
+ggsave("results/manuscript/ifna/violin_facs_sigf.pdf", width = 7, height = 6)
+
+
+#### NK FACS
+ifna_df %>% filter(variable %in% sigf_variables) %>% left_join(p.df %>% filter(p.adj < 0.05)) %>% 
+  left_join(var_df) %>% filter(type == "facs") %>% 
+  filter(variable %in% c("NKCD16",	"NKCD27",	"NKCD45RA",	"CD56BRIGHT",	"NKCD57", "NKCD62L", "NK_GrB")) %>% 
+  
+  ggplot(aes(timepoint, value, fill = fill)) + geom_violin(draw_quantiles = 0.5) + ggpubr::stat_compare_means(label = "p.signif") + 
+  # facet_wrap(~reorder(variable, p.adj), scales = "free_y") + # ggsignif::geom_signif(comparisons = list(c("3mo", "12mo"))) +
+  facet_wrap(~variable, scales = "free_y") + # ggsignif::geom_signif(comparisons = list(c("3mo", "12mo"))) +
+  geom_vline(xintercept = 1.5, linetype = "dotted") + geom_vline(xintercept = 2.5, linetype = "dotted") + ggpubr::rotate_x_text(angle = 45) + scale_fill_manual(values = getPalette3(4)) + geom_jitter(size = 0.5) + facets_nice +
+  labs(x = "", y = "prop of NK cells")
+ggsave("results/manuscript/ifna/violin_nk_facs_sigf.pdf", width = 7, height = 4)
+
+ifna_df %>% filter(variable %in% sigf_variables) %>% left_join(p.df %>% filter(p.adj < 0.05)) %>% 
+  left_join(var_df) %>% filter(type == "facs") %>% 
+  filter(variable %in% c("NKCD16",	"NKCD27",	"NKCD45RA",	"CD56BRIGHT",	"NKCD57", "NKCD62L", "NK_GrB")) %>% 
+  
+  ggplot(aes(timepoint, value, fill = fill)) + geom_violin(draw_quantiles = 0.5) + ggpubr::stat_compare_means(label = "p.signif") + geom_path(aes(group=name)) +
+  # facet_wrap(~reorder(variable, p.adj), scales = "free_y") + # ggsignif::geom_signif(comparisons = list(c("3mo", "12mo"))) +
+  facet_wrap(~variable, scales = "free_y") + # ggsignif::geom_signif(comparisons = list(c("3mo", "12mo"))) +
+  geom_vline(xintercept = 1.5, linetype = "dotted") + geom_vline(xintercept = 2.5, linetype = "dotted") + ggpubr::rotate_x_text(angle = 45) + scale_fill_manual(values = getPalette3(4)) + geom_jitter(size = 0.5) + facets_nice +
+  labs(x = "", y = "prop of NK cells")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+g1_cluster <- c("1377", "1389", "1444", "1449", "1451", "1463", "1478", "1480", "1421", 
+                "1522", "1519", "1534", "1545", "1560", "1570", "1547", "1582", "1583")
+
+facs_12mo %>% mutate(g_cluster = ifelse(FM %in% g1_cluster, "G1", "G2")) %>% 
+  mutate(timepoint = factor(as.character(timepoint), levels = c("0mo", "3mo", "12mo"))) %>% 
+  dplyr::select(CD8.TEMRA, NKCD27, timepoint, g_cluster) %>% melt(id = c("timepoint", "g_cluster")) %>% 
+  ggplot(aes(timepoint, value, fill = g_cluster)) + 
+  theme_classic(base_size = 12) + 
+  geom_boxplot(outlier.shape = NA) + facet_wrap(variable~g_cluster, ncol = 2) + ggsignif::geom_signif(comparisons = list(c("0mo", "3mo"), c("3mo", "12mo"), c("0mo", "12mo")), step_increase = 0.05) + 
+  geom_jitter(size=0.5) + facets_nice + scale_fill_manual(values = getPalette3(4)) + labs(fill = "", x = "timepoint") + theme(legend.position = "none")
+ggsave("results/manuscript/ifna/box_sigf_cluster.pdf", width = 4, height = 6)
+
+
+
+## mann-whitney; baseline
+df <- facs_12mo %>% mutate(g_cluster = ifelse(FM %in% g1_cluster, "G1", "G2")) %>% 
+  mutate(timepoint = factor(as.character(timepoint), levels = c("0mo", "3mo", "12mo"))) %>% 
+  filter(timepoint %in% c("0mo")) %>% 
+  dplyr::select(timepoint, g_cluster, CD3:CD8_TNF_IFN) %>% melt(id = c("timepoint", "g_cluster")) 
+df$g_cluster <- as.factor(df$g_cluster)
+
+bsl_p.df <- lapply(unique(df$variable), FUN = function(x){
+  y <- df %>% filter(variable == x)
+  if(length(unique(y$g_cluster)) == 2){
+    median.x = y %>% filter(g_cluster == "G1") %>% pull(value) %>% median(na.rm = T)
+    median.y = y %>% filter(g_cluster == "G2") %>% pull(value) %>% median(na.rm = T)
+    wilcox.test(value~g_cluster, data = y) %>% broom::tidy() %>% mutate(variable = x, median.3m = median.x, median.12m = median.y, log2fc = log2(median.y/median.x), dir = ifelse(log2(median.y/median.x) > 0, "up", "down"))
+  }
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) 
+fwrite(bsl_p.df, "results/manuscript/ifna/baseline_p_cluster.txt", sep = "\t", quote = F, row.names = F)
+
+xlsx::write.xlsx(bsl_p.df, "results/manuscript/ifna/baseline_p_cluster.xlsx", col.names = TRUE, row.names = TRUE, append = FALSE)
+
+
+
+bsl_p.df %>% 
+  mutate(fill = ifelse(p.adj<0.06, dir, "unsigf")) %>% 
+  mutate(fill = factor(as.character(fill), levels = c("up", "unsigf", "down"))) %>% 
+  ggplot(aes(-log2fc, -log10(p.adj), color = fill)) + geom_point(size=2) + 
+  ggrepel::geom_text_repel(data = filter(bsl_p.df, p.adj<0.06), aes(label=variable), hjust=0, nudge_y = 0.05, color = "black", fill = "none") + xlim(c(-4,4)) + 
+  # ggplot(aes(log2fc, -log10(p.value))) + geom_point() + ggrepel::geom_text_repel(data = filter(bsl_p.df, p.adj<0.05), aes(label=variable)) + xlim(c(-4,4)) + 
+  geom_hline(yintercept = 10^0.05, linetype="dotted") + scale_color_manual(values = rev(c("salmon", "lightgrey", "dodgerblue"))) + theme(legend.position = "none") + labs(color = "", x = "log2fc")
+ggsave("results/manuscript/ifna/volcano_cluster.pdf", width = 5, height = 4)
+
+
+
+
+df <- facs_12mo %>% mutate(g_cluster = ifelse(FM %in% g1_cluster, "G1", "G2")) %>% 
+  mutate(timepoint = factor(as.character(timepoint), levels = c("0mo", "3mo", "12mo"))) %>% 
+  filter(timepoint %in% c("3mo")) %>% 
+  dplyr::select(timepoint, g_cluster, CD3:CD8_TNF_IFN) %>% melt(id = c("timepoint", "g_cluster")) 
+df$g_cluster <- as.factor(df$g_cluster)
+
+mo3_p.df <- lapply(unique(df$variable), FUN = function(x){
+  y <- df %>% filter(variable == x)
+  if(length(unique(y$g_cluster)) == 2){
+    median.x = y %>% filter(g_cluster == "G1") %>% pull(value) %>% median(na.rm = T)
+    median.y = y %>% filter(g_cluster == "G2") %>% pull(value) %>% median(na.rm = T)
+    wilcox.test(value~g_cluster, data = y) %>% broom::tidy() %>% mutate(variable = x, median.3m = median.x, median.12m = median.y, log2fc = log2(median.y/median.x), dir = ifelse(log2(median.y/median.x) > 0, "up", "down"))
+  }
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) 
+
+
+df <- facs_12mo %>% mutate(g_cluster = ifelse(FM %in% g1_cluster, "G1", "G2")) %>% 
+  mutate(timepoint = factor(as.character(timepoint), levels = c("0mo", "3mo", "12mo"))) %>% 
+  filter(timepoint %in% c("12mo")) %>% 
+  dplyr::select(timepoint, g_cluster, CD3:CD8_TNF_IFN) %>% melt(id = c("timepoint", "g_cluster")) 
+df$g_cluster <- as.factor(df$g_cluster)
+
+mo12_p.df <- lapply(unique(df$variable), FUN = function(x){
+  y <- df %>% filter(variable == x)
+  if(length(unique(y$g_cluster)) == 2){
+    median.x = y %>% filter(g_cluster == "G1") %>% pull(value) %>% median(na.rm = T)
+    median.y = y %>% filter(g_cluster == "G2") %>% pull(value) %>% median(na.rm = T)
+    wilcox.test(value~g_cluster, data = y) %>% broom::tidy() %>% mutate(variable = x, median.3m = median.x, median.12m = median.y, log2fc = log2(median.y/median.x), dir = ifelse(log2(median.y/median.x) > 0, "up", "down"))
+  }
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) 
+
+
+a <- bsl_p.df %>% dplyr::select(variable,log2fc)
+b <- mo12_p.df %>% dplyr::select(variable,log2fc)
+
+a %>% left_join(b, by = "variable") %>% 
+  ggplot(aes(log2fc.x,log2fc.y)) + geom_point() + xlim(-4,4) + ylim(-4,4) + geom_text(aes(-3,3,label="down"))
+
+
+## Kruskal-Wallis
+df <- facs_12mo %>% mutate(g_cluster = ifelse(FM %in% g1_cluster, "G1", "G2")) %>% 
+  mutate(timepoint = factor(as.character(timepoint), levels = c("0mo", "3mo", "12mo"))) %>% 
+  dplyr::select(timepoint, g_cluster, CD3:CD8_TNF_IFN) %>% melt(id = c("timepoint", "g_cluster")) 
+
+df_g1 <- subset(df, g_cluster == "G1")
+df_g2 <- subset(df, g_cluster == "G2")
+
+g1_p_krskl.df <- lapply(unique(df_g1$variable), FUN = function(x){
+  y <- df_g1 %>% filter(variable == x)
+  kruskal.test(value~timepoint, data = y) %>% broom::tidy() %>% mutate(variable = x)
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) 
+
+g2_p_krskl.df <- lapply(unique(df_g2$variable), FUN = function(x){
+  y <- df_g2 %>% filter(variable == x)
+  kruskal.test(value~timepoint, data = y) %>% broom::tidy() %>% mutate(variable = x)
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) 
+
+fwrite(g1_p_krskl.df, "results/manuscript/ifna/p_df_g1_cluster_krskl.txt", sep = "\t", quote = F, row.names = F)
+fwrite(g2_p_krskl.df, "results/manuscript/ifna/p_df_g2_cluster_krskl.txt", sep = "\t", quote = F, row.names = F)
+
+
+
+## mann-whitney
+df <- facs_12mo %>% mutate(g_cluster = ifelse(FM %in% g1_cluster, "G1", "G2")) %>% 
+  mutate(timepoint = factor(as.character(timepoint), levels = c("0mo", "3mo", "12mo"))) %>% 
+  filter(timepoint %in% c("3mo", "12mo")) %>% 
+  dplyr::select(timepoint, g_cluster, CD3:CD8_TNF_IFN) %>% melt(id = c("timepoint", "g_cluster")) 
+
+df_g1 <- subset(df, g_cluster == "G1")
+df_g2 <- subset(df, g_cluster == "G2")
+
+g1_p.df <- lapply(unique(df_g1$variable), FUN = function(x){
+  y <- df_g1 %>% filter(variable == x)
+  if(length(unique(y$timepoint)) == 2){
+    median.x = y %>% filter(timepoint == "3mo") %>% pull(value) %>% median(na.rm = T)
+    median.y = y %>% filter(timepoint == "12mo") %>% pull(value) %>% median(na.rm = T)
+    wilcox.test(value~timepoint, data = y) %>% broom::tidy() %>% mutate(variable = x, median.3m = median.x, median.12m = median.y, dir = ifelse(log2(median.y/median.x) > 0, "up", "down"))
+  }
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) 
+
+g2_p.df <- lapply(unique(df_g2$variable), FUN = function(x){
+  y <- df_g2 %>% filter(variable == x)
+  if(length(unique(y$timepoint)) == 2){
+    median.x = y %>% filter(timepoint == "3mo") %>% pull(value) %>% median(na.rm = T)
+    median.y = y %>% filter(timepoint == "12mo") %>% pull(value) %>% median(na.rm = T)
+    wilcox.test(value~timepoint, data = y) %>% broom::tidy() %>% mutate(variable = x, median.3m = median.x, median.12m = median.y, dir = ifelse(log2(median.y/median.x) > 0, "up", "down"))
+  }
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) 
+
+fwrite(g1_p.df, "results/manuscript/ifna/p_df_g1_cluster_12v3.txt", sep = "\t", quote = F, row.names = F)
+fwrite(g2_p.df, "results/manuscript/ifna/p_df_g2_cluster_12v3.txt", sep = "\t", quote = F, row.names = F)
+
+g1_p.df %>% filter(p.adj < 0.5)
+g2_p.df %>% filter(p.adj < 0.5)
+
+
+
+
+## PE/PAH
+pe <- c("1444", "1463", "1478", "1545", "1582")
+
+
+## mann-whitney; baseline
+df <- facs_12mo %>% mutate(pe = ifelse(FM %in% pe, "PE", "No PE")) %>% 
+  mutate(timepoint = factor(as.character(timepoint), levels = c("0mo", "3mo", "12mo"))) %>% 
+  filter(timepoint %in% c("0mo")) %>% 
+  dplyr::select(timepoint, pe, CD3:CD8_TNF_IFN) %>% melt(id = c("timepoint", "pe")) 
+df$pe <- as.factor(df$pe)
+
+bsl_pe_p.df <- lapply(unique(df$variable), FUN = function(x){
+  y <- df %>% filter(variable == x)
+  if(length(unique(y$pe)) == 2){
+    median.x = y %>% filter(pe == "PE") %>% pull(value) %>% median(na.rm = T)
+    median.y = y %>% filter(pe == "No PE") %>% pull(value) %>% median(na.rm = T)
+    wilcox.test(value~pe, data = y) %>% broom::tidy() %>% mutate(variable = x, median.3m = median.x, median.12m = median.y, log2fc = log2(median.y/median.x), dir = ifelse(log2(median.y/median.x) > 0, "up", "down"))
+  }
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) 
+
+
+df <- facs_12mo %>% mutate(pe = ifelse(FM %in% pe, "PE", "No PE")) %>% 
+  mutate(timepoint = factor(as.character(timepoint), levels = c("0mo", "3mo", "12mo"))) %>% 
+  filter(timepoint %in% c("3mo")) %>% 
+  dplyr::select(timepoint, pe, CD3:CD8_TNF_IFN) %>% melt(id = c("timepoint", "pe")) 
+df$pe <- as.factor(df$pe)
+
+mo3_pe_p.df <- lapply(unique(df$variable), FUN = function(x){
+  y <- df %>% filter(variable == x)
+  if(length(unique(y$pe)) == 2){
+    median.x = y %>% filter(pe == "PE") %>% pull(value) %>% median(na.rm = T)
+    median.y = y %>% filter(pe == "No PE") %>% pull(value) %>% median(na.rm = T)
+    wilcox.test(value~pe, data = y) %>% broom::tidy() %>% mutate(variable = x, median.3m = median.x, median.12m = median.y, log2fc = log2(median.y/median.x), dir = ifelse(log2(median.y/median.x) > 0, "up", "down"))
+  }
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) 
+
+head(bsl_pe_p.df)
+head(mo3_pe_p.df)
+head(mo12_pe_p.df)
+
+facs_12mo$timepoint
+facs_12mo %>% 
+  filter(timepoint == "0mo") %>% 
+  mutate(pe = ifelse(FM %in% pe, "PE", "No PE")) %>% mutate(g_cluster = ifelse(FM %in% g1_cluster, "G1", "G2")) %>% 
+  group_by(pe,g_cluster) %>% summarise(n=n())
+
+matrix(c(4,14,2,20), ncol=2) %>% fisher.test(alternative = "greater")
+
+df <- facs_12mo %>% mutate(pe = ifelse(FM %in% pe, "PE", "No PE")) %>% mutate(g_cluster = ifelse(FM %in% g1_cluster, "G1", "G2")) %>% 
+  mutate(timepoint = factor(as.character(timepoint), levels = c("0mo", "3mo", "12mo"))) %>% 
+  filter(timepoint %in% c("12mo")) %>% 
+  dplyr::select(timepoint, pe, CD3:CD8_TNF_IFN) %>% melt(id = c("timepoint", "pe")) 
+df$pe <- as.factor(df$pe)
+
+mo12_pe_p.df <- lapply(unique(df$variable), FUN = function(x){
+  y <- df %>% filter(variable == x)
+  if(length(unique(y$pe)) == 2){
+    median.x = y %>% filter(pe == "PE") %>% pull(value) %>% median(na.rm = T)
+    median.y = y %>% filter(pe == "No PE") %>% pull(value) %>% median(na.rm = T)
+    wilcox.test(value~pe, data = y) %>% broom::tidy() %>% mutate(variable = x, median.3m = median.x, median.12m = median.y, log2fc = log2(median.y/median.x), dir = ifelse(log2(median.y/median.x) > 0, "up", "down"))
+  }
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) 
+
+
+aes <- fread("data/clinical/aes.txt")
+aes[aes$V4 == "pleural effusion", ]
+as.data.frame(aes)[grep("pleur", aes$V4, value = F), ]
+

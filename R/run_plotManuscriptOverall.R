@@ -1,0 +1,892 @@
+
+# cml_seurat      <- readRDS("results/cml_seurat_new.rds")
+cml_seurat      <- readRDS("results/cml_seurat.rds")
+clonality_genes <- getClonalityGenes(cml_seurat)
+unwanted_genes  <- getUnwantedGenes(cml_seurat)
+
+## Preprocess data
+cml_seurat <- cml_seurat %>% getQC()
+cml_seurat <- cml_seurat %>% preprocessSeurat(cells.to.use = colnames(cml_seurat))
+
+## Do scVI
+dir.create("results/scvi/input_files/new/", showWarnings = F)
+cml_seurat %>% getScviInput(folder = "results/scvi/input_files/new/")
+latents    <- fread("results/scvi/results/cml_oneshot_latent.csv")
+cml_seurat <- cml_seurat %>% putLatentsSeurat(latent = latents)
+cml_seurat <- cml_seurat %>% getLatentClustering() %>% fixSeurat()
+
+## Decide on clustering
+cml_seurat %>% plotClustering()
+Idents(cml_seurat) <- cml_seurat$RNA_snn_res.0.6
+cml_seurat$cluster <- Idents(cml_seurat)
+
+saveRDS(cml_seurat, "results/cml_seurat_new_wo_qc_clusters.rds")
+saveRDS(cml_seurat_qc, "results/cml_seurat_new.rds")
+
+## Remove clusters that group only based low amount of genes
+cells.to.keep <- cml_seurat@meta.data %>% filter(!cluster %in% c(4,9,15,18)) %>% pull(barcode)
+cml_seurat_qc <- subset(cml_seurat, cells = cells.to.keep) %>% getLatentUMAP() %>% fixSeurat()
+
+## Do scVI
+dir.create("results/scvi/input_files/qc/", showWarnings = F)
+cml_seurat_qc %>% getScviInput(folder = "results/scvi/input_files/qc/")
+latents    <- fread("results/scvi/results/cml_oneshot_latent_qc.csv")
+cml_seurat_qc <- cml_seurat_qc %>% putLatentsSeurat(latent = latents)
+cml_seurat_qc <- cml_seurat_qc %>% getLatentClustering() %>% fixSeurat()
+cml_seurat    <- cml_seurat_qc
+cml_seurat %>% plotClustering()
+
+## Decide on clustering
+Idents(cml_seurat) <- cml_seurat$RNA_snn_res.0.8 %>% getClusterPhenotypes()
+cml_seurat$cluster <- Idents(cml_seurat)
+
+cml_seurat           <- RunUMAP(cml_seurat, reduction = "latent", dims = 1:30, n.neighbors = 10, min.dist = 0.01)
+cml_seurat$patient   <- extractName(cml_seurat$orig.ident)
+cml_seurat$timepoint <- extractTimepoint(cml_seurat$orig.ident) %>% factor(levels = c("dg", "3mo", "12mo"))
+cml_seurat$effusion  <- ifelse(cml_seurat$patient %in% c(716,720), "effusion", "no effusion")
+
+cml_seurat <- getSingler(cml_seurat, cluster = NULL, method = NULL, sample = NULL)
+patient_df <- cml_seurat@meta.data %>% group_by(orig.ident, timepoint) %>% summarise(n = n()) %>% dplyr::select(-n) %>% ungroup()
+
+saveRDS(cml_seurat, "results/cml_seurat_new.rds")
+saveRDS(nk_seurat, "results/nk_seurat.rds")
+# cml_seurat <- readRDS("results/cml_seurat_new.rds")
+
+##################################
+
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(nCount_RNA))) %>% 
+  ggplot(aes(reorder(cluster, median), nCount_RNA)) + geom_violin(fill = "lightgrey", draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 15) + theme(legend.position = "none") + ggpubr::rotate_x_text(90) + labs(x = "")
+ggsave("results/manuscript/overall/vln_nCount_rna.pdf", width = 5, height = 5)
+
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(nFeature_RNA))) %>% 
+  ggplot(aes(reorder(cluster, median), nFeature_RNA, fill = cluster)) + geom_violin(fill = "lightgrey", draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 15) + theme(legend.position = "none") + ggpubr::rotate_x_text(90) + labs(x = "")
+ggsave("results/manuscript/overall/vln_nFeature_RNA.pdf", width = 5, height = 5)
+
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(percent.mt))) %>% 
+  ggplot(aes(reorder(cluster, median), percent.mt, fill = cluster)) + geom_violin(fill = "lightgrey", draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 15) + theme(legend.position = "none") + ggpubr::rotate_x_text(90) + labs(x = "")
+ggsave("results/manuscript/overall/vln_percent.mt.pdf", width = 5, height = 5)
+
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(percent.ribo))) %>% 
+  ggplot(aes(reorder(cluster, median), percent.ribo, fill = cluster)) + geom_violin(fill = "lightgrey", draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 15) + theme(legend.position = "none") + ggpubr::rotate_x_text(90) + labs(x = "")
+ggsave("results/manuscript/overall/vln_percent.ribo.pdf", width = 5, height = 5)
+
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(percent.cycle))) %>% 
+  ggplot(aes(reorder(cluster, median), percent.cycle, fill = cluster)) + geom_violin(fill = "lightgrey", draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 15) + theme(legend.position = "none") + ggpubr::rotate_x_text(90) + labs(x = "")
+ggsave("results/manuscript/overall/vln_percent.cycle.pdf", width = 5, height = 5)
+
+
+df <- cml_seurat@meta.data %>% group_by(orig.ident, cluster, tcr = !is.na(new_clonotypes_id)) %>% summarise(n = n()) %>% 
+  mutate(prop = n / sum(n)) %>% filter(tcr == T) 
+
+df %>% left_join(df %>% group_by(cluster) %>% summarise(median = median(prop))) %>% 
+  ggplot(aes(reorder(cluster, median), prop, fill = cluster)) + geom_boxplot(outlier.shape = NA, fill = "lightgrey") + theme_classic(base_size = 15) + theme(legend.position = "none") + ggpubr::rotate_x_text(90) + labs(x = "") + geom_jitter(size = 0.5)
+ggsave("results/manuscript/overall/box_prop_tcr.pdf", width = 5, height = 5)
+
+cml_seurat@meta.data %>% 
+  filter(!is.na(new_clonotypes_id)) %>% 
+  group_by(orig.ident, cluster, new_clonotypes_id) %>% summarise(n = n()) %>% 
+  group_by(cluster) %>% summarise(gini = ineq::Gini(n)) %>% 
+  ggplot(aes(reorder(cluster,gini),gini, fill = cluster)) + geom_bar(color = "black", stat = "identity", outlier.shape = NA, fill = "lightgrey", draw_quantiles = 0.5) + theme_classic(base_size = 15) + theme(legend.position = "none") + ggpubr::rotate_x_text(90) + labs(x = "") + geom_point(size = 0.5) + labs(y = "Gini index")
+ggsave("results/manuscript/overall/bar_gini.pdf", width = 5, height = 5)
+
+cml_seurat@meta.data %>% 
+  group_by(cluster) %>% summarise(n = n()) %>% 
+  ggplot(aes(reorder(cluster,n),n, fill = cluster)) + geom_bar(color = "black", stat = "identity", outlier.shape = NA, fill = "lightgrey", draw_quantiles = 0.5) + theme_classic(base_size = 15) + theme(legend.position = "none") + ggpubr::rotate_x_text(90) + labs(x = "") + geom_point(size = 0.5) + labs(y = "nCells") + coord_flip()
+ggsave("results/manuscript/overall/bar_nCellsi.pdf", width = 5, height = 5)
+
+
+
+
+
+
+## Plot most notable markers
+big_markers           <- c("CD3E", "TRAC",            ## T cell
+                           "SELL", "IL7R", "LEF1", "TCF7", "CD4", "IL2",
+                           "CD8A", "CD8B", "GZMA", "PRF1", "GZMB", "GNLY", "CXCR3",     ## CD8+ cell
+                           "IFNG",
+                           "GZMK", "CD27", "CD28", "IL2RA", "CCL5",             ## memory
+                           "FOXP3", "PDCD1", "LAG3", "HAVCR2", "CTLA4", ## Inhibitory genes
+                           "NKG7", "FCGR3A","KLRG1", "KLRB1", "KLRD1", "NCAM1", ## NK-cell
+                           "LYZ", "CD14", "CST3",              ## monocytes
+                           "FCER1A", "CLEC10A",                         ## cDC
+                           "CLEC4C", "PTPRS", "TCF4",          ## pDC
+                           "MS4A1", "CD19", "IL4R",                   ## b cells
+                           "TNFRSF17", "JCHAIN",       ## plasma cells
+                           "MKI67" )
+
+DimPlot(cml_seurat, reduction = "umap", cols = getPalette3(20), label = T, repel = T) + theme_bw(base_size = 12) + theme(legend.position = "none") + labs(x = "UMAP1", y = "UMAP2")
+ggsave("results/manuscript/overall/latent_umap.png", width = 7, height = 6)
+
+DotPlot(cml_seurat, features = rev(unique(big_markers)), cols = "RdYlBu") + labs(x = "", y = "cluster") + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + labs(y = "") + theme(legend.position = "top")
+ggsave("results/manuscript/overall/dotplot_big_markers.pdf", width = 11, height = 7)
+
+DotPlot(cml_seurat, features = rev(unique(c("CD3E", "NCAM1", "GZMK", "SELL", "XCL1", "XCL2", "KLRC1", "IL7R", "LTB", "FCGR3A", "GZMA", "GZMB", "GZMH", "GZMM", "KLRC2", "ZEB2", "KLF2", "PRDM1", "GZMH", "LAG3"))), cols = "RdYlBu") +
+  theme_classic(base_size = 15) + ggpubr::rotate_x_text(angle = 90) + labs(x = "", y  = "") + theme(legend.position = "top")
+ggsave("results/manuscript/overall/dotplot_dufva_markers.pdf", width = 11, height = 7)
+
+guo_genes <- guo_markers %>% do.call(what = "c") %>% as.character() %>% rev %>% unique()
+t_cells  <- cml_seurat@meta.data %>% filter(grepl("CD4", cluster) | grepl("CD8", cluster)) %>% pull(barcode)
+t_seurat <- subset(cml_seurat, cells = t_cells) %>% preprocessSeurat(cells = t_cells)
+
+p <- DotPlot(cml_seurat, features = guo_genes, cols = "RdYlBu") + theme_classic(base_size = 15) + ggpubr::rotate_x_text(angle = 90) + labs(x = "", y  = "") + theme(legend.position = "top")
+ggsave(plot = p, "results/manuscript/overall/dotplot_guo_markers.pdf", width = 10, height = 6)
+
+cd4_cells  <- cml_seurat@meta.data %>% filter(grepl("CD4", cluster)) %>% pull(barcode)
+cd4_seurat <- subset(cml_seurat, cells = cd4_cells) %>% preprocessSeurat(cells = cd4_cells)
+zhang_cd4_genes <- zhang_cd4_markers %>% do.call(what = "c") %>% as.character() %>% rev %>% unique()
+p <- DotPlot(cd4_seurat, features = zhang_cd4_genes, cols = "RdYlBu") + ggpubr::rotate_x_text(angle = 90) + labs(x = "", y  = "") + theme(legend.position = "top")
+ggsave(plot = p, "results/manuscript/overall/dotplot_zhang_cd4_markers.pdf", width = 16, height = 3)
+
+cd8_cells  <- cml_seurat@meta.data %>% filter(grepl("CD8", cluster)) %>% pull(barcode)
+cd8_seurat <- subset(cml_seurat, cells = cd8_cells) %>% preprocessSeurat(cells = cd8_cells) %>% getLatentUMAP()
+zhang_cd8_genes <- zhang_cd8_markers %>% do.call(what = "c") %>% as.character() %>% rev %>% unique()
+p <- DotPlot(cd8_seurat, features = zhang_cd4_genes, cols = "RdYlBu") + ggpubr::rotate_x_text(angle = 90) + labs(x = "", y  = "") + theme(legend.position = "top")
+ggsave(plot = p, "results/manuscript/overall/dotplot_zhang_cd8_markers.pdf", width = 16, height = 5)
+
+## SingleR
+p <- cml_seurat@meta.data %>% group_by(cluster, singler_hpca_pred) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>% filter(prop > 0.1) %>%
+  ggplot(aes(singler_hpca_pred, prop, fill = singler_hpca_pred, label = singler_hpca_pred)) + geom_bar(stat = "identity") + add_guide + scale_fill_manual(values = getPalette(20)) + facet_wrap(~cluster, ncol = 6) + coord_flip() +
+  theme_bw(base_size = 12) + labs(x = "") + theme(legend.position = "none") + geom_hline(yintercept = 0.5, linetype = "dotted") + ggrepel::geom_text_repel()
+ggsave(plot = p, "results/manuscript/overall/bar_predictions_hpca.png", width = 12, height = 8)
+
+p <- cml_seurat@meta.data %>% group_by(cluster, singler_blueprint_pred) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>% filter(prop > 0.1) %>%
+  ggplot(aes(singler_blueprint_pred, prop, fill = singler_blueprint_pred, label = singler_blueprint_pred)) + geom_bar(stat = "identity") + add_guide + scale_fill_manual(values = getPalette(18)) + facet_wrap(~cluster, ncol = 6) + coord_flip() +
+  theme_bw(base_size = 12) + labs(x = "") + theme(legend.position = "none") + geom_hline(yintercept = 0.5, linetype = "dotted") + ggrepel::geom_text_repel() + ylim(values = c(0,1))
+ggsave(plot = p, "results/manuscript/overall/bar_predictions_blueprint.png", width = 12, height = 8)
+
+
+## TCR
+clusters <- cml_seurat@meta.data %>% mutate(clusters = Idents(cml_seurat)) %>% group_by(clusters, !is.na(new_clonotypes_id)) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>% filter(`!is.na(new_clonotypes_id)` == T) %>% filter(prop > 0.4) %>% pull(clusters) %>% as.character() %>% unique()
+
+cml_seurat@meta.data %>% 
+  mutate(cluster = Idents(cml_seurat)) %>%
+  filter(cluster %in% clusters) %>%
+  filter(!is.na(new_clonotypes_id)) %>%
+  group_by(cluster, new_clonotypes_id) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>%
+  summarise(diversity = vegan::diversity(prop), gini = ineq::Gini(prop)) %>%
+  
+  ggplot(aes(gini,diversity,label=cluster)) + geom_point(shape = 21, fill = "lightgrey", size = 3) + ggrepel::geom_text_repel() + labs(x = "Gini index", y = "Shannon diveristy")
+ggsave("results/manuscript/overall/scatter_gini_clonality.pdf", width = 5, height = 4)
+
+cml_seurat@meta.data %>% mutate(clusters = Idents(cml_seurat)) %>%
+  group_by(clusters, !is.na(new_clonotypes_id)) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>%
+  filter(`!is.na(new_clonotypes_id)` == T) %>%
+  
+  ggplot(aes(reorder(clusters, prop), prop)) + geom_bar(stat = "identity") + ggpubr::rotate_x_text(45) +
+  geom_hline(yintercept = 0.5, linetype = "dotted") + labs(x = "", y = "proportion of cells with TCR") + ylim(c(0,1))
+ggsave("results/manuscript/overall/bar_tcrab_cluster.pdf", width = 5, height = 4)
+
+cml_seurat@meta.data %>% mutate(clusters = Idents(cml_seurat)) %>%
+  group_by(orig.ident, clusters, !is.na(new_clonotypes_id)) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>%
+  filter(`!is.na(new_clonotypes_id)` == T) %>%
+  
+  ggplot(aes(reorder(clusters, prop), prop)) + geom_boxplot(outlier.shape = NA, fill = "lightgrey") + ggpubr::rotate_x_text(45) +
+  geom_hline(yintercept = 0.5, linetype = "dotted") + labs(x = "", y = "proportion of cells with TCR") + ylim(c(0,1)) + geom_jitter(size = 0.5)
+ggsave("results/manuscript/overall/box_tcrab_cluster.pdf", width = 5, height = 4)
+
+## Proportion of clusters
+cml_seurat@meta.data %>% mutate(clusters = Idents(cml_seurat)) %>%
+  group_by(clusters) %>% summarise(n = n()) %>%
+  
+  ggplot(aes(reorder(clusters, n), n, fill = clusters, label = n)) + geom_bar(stat = "identity") + coord_flip() + scale_fill_manual(values = getPalette(24)) + theme(legend.position = "none") + labs(x = "", y = "nCells") +
+  geom_text()
+ggsave("results/manuscript/overall/bar_n_cluster.pdf", width = 5, height = 4)
+
+
+
+## Find DE-genes between all the clusters
+all_markers <- FindAllMarkers(cml_seurat, test.use = "t", verbose = T, max.cells.per.ident = 1e3)
+all_markers <- all_markers %>% filter(p_val_adj < 0.05) %>% filter(avg_logFC > 0)
+
+all_markers <- all_markers %>% mutate(cluster = cluster %>% extractClusterNumber()%>% do.call(what = "c") %>% as.factor() %>% getClusterPhenotypes())
+fwrite(all_markers, "results/manuscript/overall/all_markers_1e3.txt", sep = "\t", quote = F, row.names = F)
+all_markers <- fread("results/manuscript/overall/all_markers_1e3.txt") %>% mutate(cluster = extractClusterNumber() %>% do.call(what = "c") %>% as.factor() %>% getClusterPhenotypes())
+
+
+all_markers %>% 
+  group_by(cluster) %>% summarise(n=n()) %>% 
+  ggplot(aes(reorder(cluster,n),n)) + geom_segment(aes(x=reorder(cluster,n),xend=reorder(cluster,n),y=0,yend=n)) + geom_point(shape=21,size=5, fill = "lightgrey") + 
+  scale_fill_manual(values=getPalette(8)) + facets_nice + labs(x = "", y = "DEGs") + coord_flip() #+ ggrepel::geom_text_repel(data = subset(df, timepoint == "3movdg"), aes(label=cluster), nudge_y = 100) #+ theme(legend.position = "none")
+ggsave("results/manuscript/overall/lolliplot_deg_dasa.pdf", width = 6, height = 5)
+
+
+
+set.seed(123)
+all_markers %>% filter(gene %in% big_markers)
+all_markers %>% filter(gene %in% cytotoxic_markers)
+all_markers %>% filter(gene %in% do.call(guo_markers, what = "c"))
+
+top10 <- all_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+
+cells <- cml_seurat@meta.data %>% mutate(cluster = Idents(cml_seurat)) %>% group_by(cluster) %>% sample_n(27) %>% pull(barcode)
+heatmap_seurat <- cml_seurat %>% preprocessSeurat(cells.to.use = cells)
+p <- DoHeatmap(heatmap_seurat, cells = cells, features = top10$gene, angle = 90, group.colors = getPalette(24)) + theme(legend.position = "none")
+ggsave(plot = p, "results/manuscript/overall/heatmap_top10_markers.png", width = 16, height = 20)
+
+
+
+##### Find the BCR-ABL1 positive cells
+
+## Giustacchini
+gisutacchini_deg <- fread("/Users/janihuuh/Dropbox/cml_stop/data/bcr_abl_pathway/giustacchini_deg_ablpos_neg.txt") %>% filter(Log2FC > 0) %>% pull(Gene)
+gisutacchini_deg <- gisutacchini_deg[gisutacchini_deg %in% rownames(cml_seurat)]
+
+cml_seurat <- AddModuleScore(cml_seurat, features = list(gisutacchini_deg), name = "bcrabl")
+median_df  <- cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(bcrabl1))
+
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(bcrabl1))) %>% 
+  ggplot(aes(reorder(cluster, median), bcrabl1, fill = cluster)) + geom_violin(draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 12) + theme(legend.position = "none") + ggpubr::rotate_x_text(45) + labs(x = "", y = "BCR-ABL1 score") 
+ggsave("results/manuscript/overall/vln_bcrabl1.pdf", width = 7, height = 4)
+
+FeaturePlot(cml_seurat, feature = "bcrabl1", reduction = "umap", cols = c("lightgrey", "salmon")) + theme_bw(base_size = 12) + labs("UMAP1","UMAP2")
+ggsave("results/manuscript/overall/umap_bcrabl.png", width = 5, height = 4)
+
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(bcrabl1))) %>% 
+  filter(timepoint %in% c("dg", "3mo")) %>% 
+  ggplot(aes(timepoint, bcrabl1, fill = cluster)) + geom_violin(draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 12) + theme(legend.position = "none") + ggpubr::rotate_x_text(45) + labs(x = "", y = "BCR-ABL1 score") + 
+  ggpubr::stat_compare_means(label="p") +
+  facet_wrap(~cluster, scales = "free_y") 
+ggsave("results/manuscript/overall/vln_bcrabl1_timepoint.pdf", width = 7, height = 6)
+
+a <- FeaturePlot(cml_seurat, features = "hallmark_ifna1", split.by = "timepoint", combine = F, cols = c("lightgrey", "tomato"), order = F, min.cutoff = 0, max.cutoff = 8) 
+
+FeaturePlot(cml_seurat, reduction = "umap", features = "hallmark_ifna1", cols = c(low = "dodgerblue", mid = "white", high = "tomato"), order = T, min.cutoff = 0.5, max.cutoff = 2, label = T, repel = T) 
+
+FeaturePlot(cml_seurat, reduction = "umap", features = "hallmark_ifna1", cols = c(low = "dodgerblue", mid = "gray90", high = "salmon"), order = T, min.cutoff = 0.25, max.cutoff = 2.5, label = F, repel = T, pt.size = 0.5, label.size = 3) + theme_bw(base_size = 12)
+ggsave("results/manuscript/ifna/umap_ifna_score.png", width = 5, height = 4)
+
+cols <- brewer.pal(9, "RdYlBu")
+FeaturePlot(cml_seurat, reduction = "umap", features = "hallmark_ifna1", cols = c(low = cols[9], mid = cols[4], high = cols[1]), order = T, min.cutoff = 0.25, max.cutoff = 2.5, label = F, repel = T, pt.size = 0.5) + theme_bw(base_size = 12)
+ggsave("results/manuscript/ifna/umap_ifna_score.png", width = 5, height = 4)
+
+hist(cml_seurat$hallmark_ifna1)
+summary(cml_seurat$hallmark_ifna1)
+
+cml_seurat@reductions$umap@cell.embeddings %>% as.data.frame() %>% bind_cols(cml_seurat@meta.data) %>% 
+  ggplot(aes(UMAP_1,UMAP_2,color=hallmark_ifna1), alpha = 0.5) + geom_point(size = 0.5) + scale_color_gradient2(low = "dodgerblue", mid = "yellow", high = "tomato")
+
+## Calculate other scores
+cytolytic <- c("GZMB", "GZMH", "PRF1", "GNLY", "GZMA")
+
+# ifna_hallmark <- fread("results/interferon_alpha/hallmark_ifna.txt")[-1,]
+ifna_hallmark <- fread("results/manuscript/ifna/hallmark_ifna.txt")[-1,]
+
+cml_seurat    <- AddModuleScore(cml_seurat, list(ifna_hallmark$HALLMARK_INTERFERON_ALPHA_RESPONSE), name = "hallmark_ifna")
+cml_seurat    <- AddModuleScore(cml_seurat, features = list(cytolytic), name = "cytolytic")
+cml_seurat    <- AddModuleScore(cml_seurat, features = list(inhibitory_markers), name = "exhaustion")
+cml_seurat    <- AddModuleScore(cml_seurat, features = list(inhibitory_long), name = "inhibitory_long")
+cml_seurat    <- AddModuleScore(cml_seurat, features = list(cytotoxic_markers), name = "cytotoxicity")
+
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(cytolytic1))) %>% 
+  ggplot(aes(reorder(cluster, median), cytolytic1, fill = cluster)) + geom_violin(draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 12) + theme(legend.position = "none") + ggpubr::rotate_x_text(45) + labs(x = "", y = "cytolytic score") 
+ggsave("results/manuscript/overall/vln_cytolytic.pdf", width = 7, height = 4)
+
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(exhaustion1))) %>% 
+  ggplot(aes(reorder(cluster, median), exhaustion1, fill = cluster)) + geom_violin(draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 12) + theme(legend.position = "none") + ggpubr::rotate_x_text(45) + labs(x = "", y = "exhaustion score") 
+ggsave("results/manuscript/overall/vln_exhaustion.pdf", width = 7, height = 4)
+
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(inhibitory_long1))) %>% 
+  ggplot(aes(reorder(cluster, median), inhibitory_long1, fill = cluster)) + geom_violin(draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 12) + theme(legend.position = "none") + ggpubr::rotate_x_text(45) + labs(x = "", y = "inhibitory score") 
+ggsave("results/manuscript/overall/vln_inhibitory_long.pdf", width = 7, height = 4)
+
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(cytotoxicity1))) %>% 
+  ggplot(aes(reorder(cluster, median), cytotoxicity1, fill = cluster)) + geom_violin(draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 12) + theme(legend.position = "none") + ggpubr::rotate_x_text(45) + labs(x = "", y = "cytotoxicity score") 
+ggsave("results/manuscript/overall/vln_cytotoxicityc.pdf", width = 7, height = 4)
+
+
+
+cml_seurat@meta.data %>% 
+  filter(celltype %in% c("CD8", "NK")) %>%
+  filter(!cluster %in% c("12 CD8 MAIT-like CXCR3+", "13 NK CD56bright", "1 CD8 EM GZMK+ CXCR3+", "2 CD8 cytotoxic GZMH+", "8 CD8 naive TCF7+", "5 CD8 EMRA ZNF683+")) %>% 
+  #  filter(cytolytic1 > 0) %>% 
+  
+  ggplot(aes(timepoint,cytolytic1)) + geom_violin(aes(fill=cluster), adjust = 0.8, draw_quantiles = 0.5) + 
+  # facet_wrap(~cluster, scales = "free_y") +
+  facet_wrap(~cluster) +
+  ggsignif::geom_signif(comparisons = list(c("dg", "3mo"), c("dg", "12mo"), c("3mo", "12mo")), step_increase = 0.05, map_signif_level = T) + 
+  theme_classic(base_size = 12) + theme(legend.position = "none") + scale_fill_manual(values = getPalette5(4)) + ggpubr::rotate_x_text(angle = 45) + labs(y = "cytolytic score", x = "") 
+ggsave("results/manuscript/overall/vln_cytolytic.pdf", width = 7, height = 4)                                                                                                                                           
+
+
+
+
+
+##  Per time point
+cml_seurat@meta.data %>% group_by(timepoint, cluster) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>% 
+  ggplot(aes(timepoint, prop, fill = cluster)) + geom_bar(stat = "identity") + scale_fill_manual(values = getPalette3(23)) + theme_classic(base_size = 12) + ggpubr::rotate_x_text(45)
+ggsave(plot = p, "results/manuscript/overall/bar_cluster.pdf", width = 7, height = 4)
+
+
+## Box plot 
+cml_seurat@meta.data %>% 
+  group_by(orig.ident, cluster) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>% left_join(patient_df) %>% 
+
+  ggplot(aes(timepoint,prop, fill = timepoint)) + geom_boxplot(outlier.shape = NA) + theme_classic(base_size = 12) +
+  facet_wrap(~cluster, scales = "free_y", ncol = 4) + ggpubr::stat_compare_means(label = "p.signif", paired = T, label.y.npc = 0.9) + geom_jitter(size = 0.5) + theme(legend.position = "none") + 
+  scale_fill_manual(values = getPalette3(4)) + facets_nice + ggpubr::rotate_x_text(angle = 45) + labs(x = "")
+ggsave("results/manuscript/overall/box_overall.pdf", width = 10, height = 10)
+
+df <- cml_seurat@meta.data %>% group_by(cluster,timepoint) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>% left_join(patient_df) %>% 
+  filter(timepoint=="3mo") %>% dplyr::select(cluster,prop) %>% dplyr::rename(ord=prop)
+
+cml_seurat@meta.data %>% 
+  group_by(cluster,timepoint) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>% left_join(df, by = "cluster") %>% 
+  
+  ggplot(aes(reorder(cluster,ord), prop, fill = timepoint)) + geom_bar(stat="identity") + scale_fill_manual(values = getPalette3(4)) + facets_nice + ggpubr::rotate_x_text(angle = 45) + labs(x = "")
+
+
+
+cml_seurat@meta.data %>% 
+  group_by(orig.ident, cluster) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>% left_join(patient_df) %>% 
+  filter(timepoint %in% c("dg", "3mo")) %>% 
+  
+  ggplot(aes(timepoint,prop, fill = timepoint)) + geom_boxplot(outlier.shape = NA) + facet_wrap(~cluster, scales = "free_y") + ggpubr::stat_compare_means(label = "p.format", paired = T) + geom_jitter(size = 0.5) + theme(legend.position = "none") + scale_fill_manual(values = getPalette3(4)) + facets_nice
+ggsave("results/manuscript/overall/box_dasa.pdf", width = 12, height = 6)
+
+
+cml_seurat@meta.data %>% 
+  group_by(orig.ident, cluster) %>% summarise(n = n()) %>% mutate(prop = n / sum(n)) %>% left_join(patient_df) %>% 
+  filter(timepoint %in% c("3mo", "12mo")) %>% 
+  
+  ggplot(aes(timepoint,prop, fill = timepoint)) + geom_boxplot() + facet_wrap(~cluster, scales = "free_y") + ggpubr::stat_compare_means(label = "p.format", paired = T) + geom_jitter(size = 0.5) + theme(legend.position = "none") + scale_fill_manual(values = getPalette3(4)) + facets_nice
+ggsave("results/manuscript/overall/box_ifna.pdf", width = 12, height = 9)
+
+
+
+## Density plot
+cml_seurat$celltype <- cml_seurat$cluster %>% extractCoarsePhenotype()
+cml_seurat$celltype <- ifelse(cml_seurat$celltype %in% c("B-cell", "CD4", "CD8", "Monocyte", "NK"), cml_seurat$celltype, NA)
+
+# median_df <- cml_seurat@reductions$umap@cell.embeddings %>% as.data.frame %>% bind_cols(cml_seurat@meta.data) %>% group_by(cluster) %>% summarise(umap1=median(UMAP_1), umap2=median(UMAP_2))
+median_df <- cml_seurat@reductions$umap@cell.embeddings %>% as.data.frame %>% bind_cols(cml_seurat@meta.data) %>% group_by(celltype) %>% summarise(umap1=median(UMAP_1), umap2=median(UMAP_2))
+
+# cml_seurat$cluster
+cml_seurat@reductions$umap@cell.embeddings %>% as.data.frame %>% bind_cols(cml_seurat@meta.data) %>%
+  ggplot(aes(UMAP_1,UMAP_2)) + 
+  stat_density_2d(aes(fill = ..level..), color="gray50", geom = "polygon") + 
+  # stat_density_2d(aes(fill = ..level.., color=cluster), geom = "polygon") + 
+  
+  #  ggalt::geom_encircle(aes(group=cluster), expand=1e-8) +
+  # stat_ellipse(aes(group=cluster,color=cluster),linetype="dashed",type = "norm", segments = 10, size = 0.5) +
+  stat_ellipse(aes(group=celltype,color=celltype),linetype="dashed",type = "norm", segments = 10, size = 0.5) +
+  facet_wrap(~timepoint) + scale_fill_distiller(direction=1) + theme_classic(base_size = 20) + theme(legend.position = "right") + labs(x = "UMAP 1", y = "UMAP 2") +
+  ggrepel::geom_label_repel(data=median_df,aes(umap1,umap2,label=celltype,color=celltype), min.segment.length = 1, nudge_y = 5, size = 6) + 
+  facets_nice + scale_color_manual(values = getPalette(9)) + guides(color = guide_legend(show = FALSE))
+ggsave("results/manuscript/overall/umap_dens_timepoint.pdf", width = 12, height = 5)
+
+
+
+## DEGs as a function of time
+deg_all <- lapply(levels(Idents(cml_seurat)), getDEGbyCluster, seurat_object = cml_seurat) %>% rbindlist()
+fwrite(deg_all, "results/manuscript/overall/deg_all.txt", sep = "\t", quote = F, row.names = F)
+# deg_all <- fread("results/manuscript/overall/deg_all.txt")
+
+deg_all %>% 
+  filter(timepoint == "3movdg") %>% 
+  group_by(cluster) %>% summarise(n = n()) %>% 
+  ggplot(aes(reorder(cluster, n),n,color=cluster,label=n)) +
+  geom_segment( aes(x=reorder(cluster, n), xend=reorder(cluster, n), y=0, yend=n), color="black") + geom_point(size = 5) +# geom_text(color = "white") +
+  coord_flip() + labs(x = "", y = "nDEGs") + scale_color_manual(values = getPalette4(19)) + theme_classic(base_size = 12) + theme(legend.position = "none")
+ggsave("results/manuscript/overall/lolli_deg_3v0.pdf", width = 5, height = 4)
+
+deg_all %>% 
+  filter(timepoint == "12mov3mo") %>% 
+  group_by(cluster) %>% summarise(n = n()) %>% 
+  ggplot(aes(reorder(cluster, n),n,color=cluster,label=n)) +
+  geom_segment( aes(x=reorder(cluster, n), xend=reorder(cluster, n), y=0, yend=n), color="black") + geom_point(size = 5) +# geom_text(color = "white") +
+  coord_flip() + labs(x = "", y = "nDEGs") + scale_color_manual(values = getPalette4(19)) + theme_classic(base_size = 12) + theme(legend.position = "none")
+ggsave("results/manuscript/overall/lolli_deg_12v3.pdf", width = 5, height = 4)
+
+deg_all %>% 
+  filter(timepoint == "12movdg") %>% 
+  group_by(cluster) %>% summarise(n = n()) %>% 
+  ggplot(aes(reorder(cluster, n),n,color=cluster,label=n)) +
+  geom_segment( aes(x=reorder(cluster, n), xend=reorder(cluster, n), y=0, yend=n), color="black") + geom_point(size = 5) +# geom_text(color = "white") +
+  coord_flip() + labs(x = "", y = "nDEGs") + scale_color_manual(values = getPalette4(19)) + theme_classic(base_size = 12) + theme(legend.position = "none")
+ggsave("results/manuscript/overall/lolli_deg_12v0.pdf", width = 5, height = 4)
+
+
+### See which has more DEGs; dasa vs dg or 12mv3mo
+deg_all %>% 
+  # filter(timepoint %in% c("3movdg", "12mov3mo")) %>% 
+  group_by(timepoint,cluster) %>% summarise(n=n()) %>% 
+  ggplot(aes(timepoint,n,fill = timepoint)) + geom_boxplot() + ggpubr::rotate_x_text(angle = 45) + scale_fill_manual(values = getPalette3(8)[c(6,7,8)]) + labs(x = "", y = "nDEG") + theme(legend.position = "none") + facets_nice +
+  ggpubr::stat_compare_means(label = "p.format") + geom_jitter(size = 0.5) +
+  ggsignif::geom_signif(comparisons = list(c("3movdg", "12mov3mo"), c("3movdg", "12movdg"), c("12movdg", "12mov3mo")), step_increase = 0.05)
+ggsave("results/manuscript/overall/box_ndeg.pdf", width = 5, height = 4)
+
+deg_all %>% 
+  filter(timepoint %in% c("3movdg", "12mov3mo")) %>% 
+  group_by(timepoint,cluster) %>% summarise(n=n()) %>% 
+  mutate(timepoint = factor(as.character(timepoint), levels = c("3movdg", "12mov3mo"))) %>% 
+  ggplot(aes(timepoint,n,fill=timepoint)) + geom_bar(stat="identity") + facet_wrap(~cluster) + ggpubr::rotate_x_text(angle = 45) + scale_fill_manual(values = getPalette3(8)[c(7,8)]) + labs(x = "", y = "nDEG") + theme(legend.position = "none") + facets_nice
+ggsave("results/manuscript/overall/bar_ndeg.pdf", width = 10, height = 8)
+
+
+
+
+## Pathways as a function of time
+universe_df <- rownames(cml_seurat)
+
+up_3v0_hallmark <- lapply(unique(deg_all$cluster), function(x){
+  p <- deg_all %>% filter(timepoint == "3movdg" & cluster == x & direction == "up") %>% getHypergeometric(universe_df = universe_df, term_df = hallmark)
+  if(!is.null(p)){
+    p %>% dplyr::mutate(cluster = x)
+  }}) %>% rbindlist() %>% filter(p.adjust < 0.05) %>% arrange(p.adjust)
+
+up_3v0_go <- lapply(unique(deg_all$cluster), function(x){
+  p <- deg_all %>% filter(timepoint == "3movdg" & cluster == x & direction == "up") %>% getHypergeometric(universe_df = universe_df, term_df = go)
+  if(!is.null(p)){
+    p %>% dplyr::mutate(cluster = x)
+  }}) %>% rbindlist() %>% filter(p.adjust < 0.05) %>% arrange(p.adjust)
+
+up_12v3_hallmark <- lapply(unique(deg_all$cluster), function(x){
+  p <- deg_all %>% filter(timepoint == "12mov3mo" & cluster == x & direction == "up") %>% getHypergeometric(universe_df = universe_df, term_df = hallmark)
+  if(!is.null(p)){
+    p %>% dplyr::mutate(cluster = x)
+  }}) %>% rbindlist() %>% filter(p.adjust < 0.05) %>% arrange(p.adjust)
+
+up_12v3_go <- lapply(unique(deg_all$cluster), function(x){
+  p <- deg_all %>% filter(timepoint == "12mov2mo" & cluster == x & direction == "up") %>% getHypergeometric(universe_df = universe_df, term_df = go)
+  if(!is.null(p)){
+    p %>% dplyr::mutate(cluster = x)
+  }}) %>% rbindlist() %>% filter(p.adjust < 0.05) %>% arrange(p.adjust)
+
+
+
+down_3v0_hallmark <- lapply(unique(deg_all$cluster), function(x){
+  p <- deg_all %>% filter(timepoint == "3movdg" & cluster == x & direction == "down") %>% getHypergeometric(universe_df = universe_df, term_df = hallmark)
+  if(!is.null(p)){
+    p %>% dplyr::mutate(cluster = x)
+  }}) %>% rbindlist() %>% filter(p.adjust < 0.05) %>% arrange(p.adjust)
+
+down_3v0_go <- lapply(unique(deg_all$cluster), function(x){
+  p <- deg_all %>% filter(timepoint == "3movdg" & cluster == x & direction == "down") %>% getHypergeometric(universe_df = universe_df, term_df = go)
+  if(!is.null(p)){
+    p %>% dplyr::mutate(cluster = x)
+  }}) %>% rbindlist() %>% filter(p.adjust < 0.05) %>% arrange(p.adjust)
+
+down_12v3_hallmark <- lapply(unique(deg_all$cluster), function(x){
+  p <- deg_all %>% filter(timepoint == "12mov3mo" & cluster == x & direction == "down") %>% getHypergeometric(universe_df = universe_df, term_df = hallmark)
+  if(!is.null(p)){
+    p %>% dplyr::mutate(cluster = x)
+  }}) %>% rbindlist() %>% filter(p.adjust < 0.05) %>% arrange(p.adjust)
+
+down_12v3_go <- lapply(unique(deg_all$cluster), function(x){
+  p <- deg_all %>% filter(timepoint == "12mov2mo" & cluster == x & direction == "down") %>% getHypergeometric(universe_df = universe_df, term_df = go)
+  if(!is.null(p)){
+    p %>% dplyr::mutate(cluster = x)
+  }}) %>% rbindlist() %>% filter(p.adjust < 0.05) %>% arrange(p.adjust)
+
+
+
+
+fwrite(up_3v0_hallmark, "results/manuscript/overall/up_3v0_hallmark.txt", sep = "\t", quote = F, row.names = F)
+fwrite(down_3v0_hallmark, "results/manuscript/overall/down_3v0_hallmark.txt", sep = "\t", quote = F, row.names = F)
+fwrite(up_3v0_go, "results/manuscript/overall/up_3v0_go.txt", sep = "\t", quote = F, row.names = F)
+fwrite(down_3v0_go, "results/manuscript/overall/down_3v0_go.txt", sep = "\t", quote = F, row.names = F)
+
+fwrite(up_12v3_hallmark, "results/manuscript/overall/up_12v3_hallmark.txt", sep = "\t", quote = F, row.names = F)
+fwrite(down_12v3_hallmark, "results/manuscript/overall/down_12v3_hallmark.txt", sep = "\t", quote = F, row.names = F)
+fwrite(up_12v3_go, "results/manuscript/overall/up_12v3_go.txt", sep = "\t", quote = F, row.names = F)
+fwrite(down_12v3_go, "results/manuscript/overall/down_12v3_go.txt", sep = "\t", quote = F, row.names = F)
+
+
+########## ========
+
+## Recluster the NK cells
+nk_cells  <- cml_seurat@meta.data %>% filter(grepl("NK", cluster)) %>% pull(barcode)
+nk_seurat <- subset(cml_seurat, cells = nk_cells) %>% preprocessSeurat(cells = nk_cells) %>% getLatentUMAP() %>% fixSeurat() 
+
+## Try reclustering; did not work
+nk_seurat <- nk_seurat %>% getLatentClustering()
+nk_seurat %>% plotClustering()
+Idents(nk_seurat) <- nk_seurat$cluster
+nk_markers <- FindAllMarkers(nk_seurat, test.use = "t", verbose = T, max.cells.per.ident = 1e3)
+nk_markers <- nk_markers %>% filter(p_val_adj < 0.05) %>% filter(avg_logFC > 0) # %>% mutate(cluster = cluster %>% extractClusterNumber()%>% do.call(what = "c") %>% as.factor() %>% getClusterPhenotypes())
+fwrite(nk_markers, "results/manuscript/overall/nk_markers_1e3.txt", sep = "\t", quote = F, row.names = F)
+
+DotPlot(nk_seurat, features = rev(unique(c("CD3E", "NCAM1", "GZMK", "SELL", "XCL1", "XCL2", "KLRC1", "IL7R", "LTB", "FCGR3A", "GZMA", "GZMB", "GZMH", "GZMM", "KLRC2", "ZEB2", "KLF2", "PRDM1", "GZMH", "LAG3"))), cols = "RdYlBu") +
+  ggpubr::rotate_x_text(angle = 90) + labs(x = "", y  = "")
+ggsave("results/manuscript/overall/dotplot_nk_clusters_dufva_markers.pdf", width = 9, height = 6)
+
+## Reclustering did not work; return to original clusters
+Idents(nk_seurat) <- nk_seurat$cluster
+
+nk_markers <- FindAllMarkers(nk_seurat, test.use = "t", verbose = T, max.cells.per.ident = 1e3)
+nk_markers <- nk_markers %>% filter(p_val_adj < 0.05) %>% filter(avg_logFC > 0) # %>% mutate(cluster = cluster %>% extractClusterNumber()%>% do.call(what = "c") %>% as.factor() %>% getClusterPhenotypes())
+fwrite(nk_markers, "results/manuscript/overall/nk_markers_1e3.txt", sep = "\t", quote = F, row.names = F)
+
+
+
+
+#### ====== 3v0 ======
+
+cells.to.keep  <- nk_seurat@meta.data %>% filter(timepoint %in% c("dg", "3mo")) %>% pull(barcode)
+nk_dasa_seurat <- subset(nk_seurat, cells = cells.to.keep) %>% getLatentUMAP() %>% fixSeurat()
+
+## Slingshot
+require(slingshot)
+nk_dasa_sce   <- as.SingleCellExperiment(nk_dasa_seurat)
+nk_dasa_sling <- slingshot(data = nk_dasa_sce, clusterLabels = 'cluster', reducedDim = "LATENT_UMAP") #, start.clus = cluster_with_earliset_timepoint)
+nk_dasa_curve <- SlingshotDataSet(nk_dasa_sling)
+curve_cols    <- c("black", "darkred", "darkblue", "darkolivegreen4")
+
+cololors                <- nk_dasa_sling$orig.clusters %>% extractClusterNumber() %>% as.numeric()
+cololors[cololors == 0] <- getPalette3(4)[1]
+cololors[cololors == 3] <- getPalette3(4)[2]
+cololors[cololors == 13] <- getPalette3(4)[3]
+
+png("results/manuscript/dasatinib/umap_sling_nk.png", width = 6, height = 5, units = "in", res = 140) #, pointsize = 5, res = )
+plot(reducedDims(nk_dasa_sling)[["LATENT_UMAP"]], col = cololors, pch = 16, asp = 1)
+text(0, 3, labels = "0 NK CD56dim")
+text(0,-1.5, labels = "3 NK CD56dim HAVCR2+")
+text(4,0.75, labels = "13 NK CD56bright")
+lines(nk_dasa_curve@curves[[1]], lwd = 4, col = "black")
+dev.off()
+
+
+## Calculate the DEGs between 3v0
+nk_deg_dasa <- lapply(unique(Idents(nk_dasa_seurat)), getDEGbyCluster, seurat_object = nk_seurat_dasa) %>% rbindlist()
+fwrite(nk_deg_dasa, "results/manuscript/overall/nk_deg_3v0.txt", sep = "\t", quote = F, row.names = F)
+nk_deg_dasa %>% filter(direction == "up") %>% filter(gene %in% big_markers)
+
+down_3v0_hallmark %>% filter(grepl("NK", cluster)) %>% View
+
+nk_seurat@meta.data %>% 
+  group_by(orig.ident,cluster) %>% summarise(n=n()) %>% mutate(prop=n/sum(n)) %>% 
+  left_join(patient_df) %>% 
+  filter(timepoint %in% c("dg", "3mo")) %>% 
+  
+  ggplot(aes(timepoint,prop,fill=timepoint)) + geom_boxplot(outlier.shape = NA) + facet_wrap(~cluster) + 
+  scale_fill_manual(values = getPalette3(4)) + theme(legend.position = "none") + labs(x = "", y = "prop of NK-cells") + facets_nice +
+  # ggpubr::stat_compare_means(label = "p.format", paired = T) + 
+  geom_jitter(size = 0.5)
+ggsave("results/manuscript/overall/boxplot_nk_clusters_dasa.pdf", width = 5.75, height = 3)
+
+
+
+
+
+
+
+patient_df <- cml_seurat@meta.data %>% group_by(orig.ident, timepoint) %>% summarise(n=n()) %>% dplyr::select(-n)
+
+
+
+## B-cells
+b_cells  <- cml_seurat@meta.data %>% filter(grepl("B-cell", cluster) & cluster != "14 CD8/B-cell doublet") %>% pull(barcode)
+b_seurat <- subset(cml_seurat, cells = b_cells) %>% preprocessSeurat(cells = b_cells) %>% getLatentUMAP() %>% fixSeurat() 
+
+## Try reclustering; did not work
+b_seurat <- b_seurat %>% getLatentClustering()
+
+b_seurat@meta.data %>% 
+  group_by(orig.ident,cluster) %>% summarise(n=n()) %>% mutate(prop=n/sum(n)) %>% 
+  left_join(patient_df) %>% 
+  filter(timepoint %in% c("dg", "3mo")) %>% 
+  
+  ggplot(aes(timepoint,prop,fill=timepoint)) + geom_boxplot(outlier.shape = NA) + facet_wrap(~cluster) + 
+  scale_fill_manual(values = getPalette3(4)) + theme(legend.position = "none") + labs(x = "", y = "prop of NK-cells") + facets_nice +
+  # ggpubr::stat_compare_means(label = "p.format", paired = T) + 
+  geom_jitter(size = 0.5)
+ggsave("results/manuscript/overall/boxplot_b_clusters_dasa.pdf", width = 5.75, height = 3)
+
+
+up_3v0_hallmark %>% filter(grepl("B-cell", cluster)) %>% View()
+down_3v0_hallmark %>% filter(grepl("B-cell", cluster)) %>% View()
+up_3v0_go %>% filter(grepl("B-cell", cluster)) %>% View()
+
+
+
+
+
+
+#### IFNa cells
+cml_seurat@meta.data %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(hallmark_ifna1))) %>% 
+  ggplot(aes(reorder(cluster, median), hallmark_ifna1, fill = cluster)) + geom_violin(draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 12) + theme(legend.position = "none") + ggpubr::rotate_x_text(45) + labs(x = "", y = "IFNalpha-score")
+ggsave("results/manuscript/ifna/violin_cluster_ifna.pdf", width = 8, height = 4)
+
+cml_seurat@meta.data %>% filter(timepoint == "dg") %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(hallmark_ifna1))) %>% 
+  ggplot(aes(reorder(cluster, median), hallmark_ifna1, fill = cluster)) + geom_violin(draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 12) + theme(legend.position = "none") + ggpubr::rotate_x_text(45) + labs(x = "", y = "IFNalpha-score")
+ggsave("results/manuscript/ifna/violin_cluster_ifna_dg.pdf", width = 8, height = 4)
+
+cml_seurat@meta.data %>% filter(timepoint == "12mo") %>% 
+  left_join(cml_seurat@meta.data %>% group_by(cluster) %>% summarise(median = median(hallmark_ifna1))) %>% 
+  ggplot(aes(reorder(cluster, median), hallmark_ifna1, fill = cluster)) + geom_violin(draw_quantiles = 0.5) + scale_fill_manual(values = getPalette5(20)) + theme_classic(base_size = 12) + theme(legend.position = "none") + ggpubr::rotate_x_text(45) + labs(x = "", y = "IFNalpha-score")
+ggsave("results/manuscript/ifna/violin_cluster_ifna_12mo.pdf", width = 8, height = 4)
+
+cml_seurat@meta.data %>% 
+  group_by(timepoint, cluster, hallmark_ifna1) %>% 
+  ggplot(aes(timepoint, hallmark_ifna1, fill = cluster)) + geom_violin(draw_quantiles = 0.5) + theme(legend.position = "none") + scale_fill_manual(values = getPalette(nClusters)) +
+  facets_nice + 
+  facet_wrap(~cluster, scales = "free_y") + facets_nice +
+  ggsignif::geom_signif(comparisons = list(c("dg", "12mo"))) + labs(x = "", y = "IFNalpha-score")
+ggsave("results/manuscript/ifna/violin_timepoint_cluster.pdf", width = 12, height = 8)
+
+cml_seurat@meta.data %>% filter(timepoint == "dg") %>% 
+  group_by(cluster, hallmark_ifna1, effusion) %>% 
+  ggplot(aes(effusion, hallmark_ifna1, fill = effusion)) + geom_violin(alpha = 0.5) + geom_boxplot(width = 0.2, outlier.shape = NA) +
+  theme(legend.position = "none") + scale_fill_manual(values = c("salmon", "lightgrey")) + ggpubr::rotate_x_text(45) +
+  facet_wrap(~cluster, scales = "free") + facets_nice + theme_bw() + theme(legend.position = "none") +
+  ggsignif::geom_signif(comparisons = list(c("effusion", "no effusion"))) 
+ggsave("results/manuscript/ifna//violin_effusion_dg.png", width = 12, height = 12)
+
+cml_seurat@meta.data %>% filter(timepoint == "12mo") %>% 
+  group_by(cluster, hallmark_ifna1, effusion) %>% 
+  ggplot(aes(effusion, hallmark_ifna1, fill = effusion)) + geom_violin(alpha = 0.5) + geom_boxplot(width = 0.2, outlier.shape = NA) +
+  theme(legend.position = "none") + scale_fill_manual(values = c("salmon", "lightgrey")) + ggpubr::rotate_x_text(45) +
+  facet_wrap(~cluster, scales = "free") + facets_nice + theme_bw() + theme(legend.position = "none") +
+  ggsignif::geom_signif(comparisons = list(c("effusion", "no effusion"))) 
+ggsave("results/manuscript/ifna//violin_effusion_12mo.png", width = 12, height = 12)
+
+cml_seurat@meta.data %>% filter(effusion = "no effusion") %>% 
+  group_by(timepoint, cluster, hallmark_ifna1) %>% 
+  ggplot(aes(timepoint, hallmark_ifna1, fill = cluster)) + geom_violin() + theme(legend.position = "none") + scale_fill_manual(values = getPalette(nClusters)) +
+  facets_nice + 
+  facet_wrap(~cluster, scales = "free_y") +
+  ggsignif::geom_signif(comparisons = list(c("dg", "12mo"))) 
+ggsave("results/manuscript/ifna//violin_timepoint_cluster.png", width = 12, height = 8)  
+
+df_dg  <- cml_seurat@meta.data %>% group_by(timepoint, cluster) %>% summarise(median = median(hallmark_ifna1)) %>% filter(timepoint=="dg") %>% ungroup() %>% dplyr::select(-timepoint)
+df_3m  <- cml_seurat@meta.data %>% group_by(timepoint, cluster) %>% summarise(median = median(hallmark_ifna1)) %>% filter(timepoint=="3mo") %>% ungroup() %>% dplyr::select(-timepoint)
+df_12m <- cml_seurat@meta.data %>% group_by(timepoint, cluster) %>% summarise(median = median(hallmark_ifna1)) %>% filter(timepoint=="12mo") %>% ungroup() %>% dplyr::select(-timepoint)
+
+df <- cml_seurat@meta.data %>% dplyr::select(cluster,timepoint,hallmark_ifna1) %>% filter(timepoint %in% c("3mo", "12mo"))
+x="3 NK CD56dim HAVCR2+"
+
+## Calculate the effect on clusters
+p.df <- lapply(unique(df$cluster), function(x){
+  df_temp <- df %>% filter(cluster == x)
+  wilcox.test(hallmark_ifna1~timepoint, data = df_temp) %>% broom::tidy() %>% mutate(variable = x)  
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj)
+fwrite(p.df, "results/manuscript/ifna/ifna_p_12m_v_3m.txt", sep = "\t", quote = F, row.names = F)
+
+
+p.df %>% 
+  ggplot(aes(reorder(variable, p.adj), -log10(p.adj), fill = variable)) + geom_bar(stat = "identity") + scale_fill_manual(values = getPalette3(20)) + labs(x = "") + 
+  theme_classic(base_size = 12) + theme(legend.position = "none") + ggpubr::rotate_x_text(angle = 45)
+ggsave("results/manuscript/ifna//bar_ifna_score_p.pdf", width = 6, height = 4)  
+
+clusters <- p.df %>% head(n=3) %>% pull(variable)
+
+cml_seurat@meta.data %>% 
+  filter(cluster %in% clusters) %>% 
+  filter(timepoint %in% c("3mo", "12mo")) %>% 
+  group_by(timepoint, cluster, hallmark_ifna1) %>% 
+  left_join(p.df, by = c("cluster" = "variable")) %>% 
+  
+  ggplot(aes(timepoint, hallmark_ifna1, fill = cluster)) + geom_violin(draw_quantiles = 0.5) + theme(legend.position = "none") + scale_fill_manual(values = getPalette4(4)) +
+  facets_nice + 
+  ggpubr::stat_compare_means(label="p.format") +
+  # facet_wrap(~cluster, scales = "free_y") + 
+  # facet_wrap(~reorder(cluster, p.adj)) + 
+  facet_wrap(~reorder(cluster, p.adj), scales = "free_y") + 
+  facets_nice +
+  ggsignif::geom_signif(comparisons = list(c("dg", "12mo"))) + labs(x = "", y = "IFNalpha-score") 
+ggsave("results/manuscript/ifna/vln_ifna_sigf.pdf", width = 6, height = 3)
+
+
+
+  
+
+
+## which cells are most adffects
+p.df <- lapply(unique(dasa_df$variable), FUN = function(x){
+  message(x)
+  y <- dasa_df %>% filter(variable == x)
+  if(length(unique(y$timepoint)) == 2){
+    median.x = y %>% filter(timepoint == "0mo") %>% pull(value) %>% median(na.rm = T)
+    median.y = y %>% filter(timepoint == "3mo") %>% pull(value) %>% median(na.rm = T)
+    wilcox.test(value~timepoint, data = y) %>% broom::tidy() %>% mutate(variable = x, median.0m = median.x, median.3m = median.y, dir = ifelse(log2(median.y/median.x) > 0, "up", "down"))
+  }
+}) %>% rbindlist() %>% mutate(p.adj = p.adjust(p.value, method = "BH")) %>% arrange(p.adj) %>% left_join(var_df)
+
+df_3m %>% left_join(df_12m, by = "cluster") %>% mutate(log2fc = log2(median.y/median.x)) %>% 
+  ggplot(aes(reorder(cluster, log2fc),log2fc)) + geom_bar(stat = "identity") + coord_flip()
+
+ggplot(aes(timepoint,median)) + geom_bar(stat="identity") + facet_wrap(~cluster)
+
+
+
+
+
+down_12v3_hallmark %>% group_by(ID) %>% summarise(n=n())
+
+
+###### ====== CD8 cells
+
+cells.to.keep <- cml_seurat@meta.data %>% filter(grepl("CD8", cluster)) %>% filter(!grepl("B-cell", cluster)) %>% filter(!grepl("MAIT", cluster)) %>% pull(barcode)
+cd8_seurat    <- subset(cml_seurat, cells = cells.to.keep)
+cd8_seurat    <- cd8_seurat %>% getLatentUMAP()
+
+DimPlot(cd8_seurat, reduction = "latent_umap", cols = getPalette3(5), label = T, repel = T) + theme_bw(base_size = 12) + theme(legend.position = "none") + labs(x = "UMAP1", y = "UMAP2")
+
+DimPlot(cd8_seurat, reduction = "latent_umap", split.by = "timepoint", ncol=3, cols = getPalette3(5), label = T, repel = T) + theme_bw(base_size = 12) + theme(legend.position = "none") + labs(x = "UMAP1", y = "UMAP2")
+
+
+median_df <- cd8_seurat@reductions$latent_umap@cell.embeddings %>% as.data.frame %>% bind_cols(cd8_seurat@meta.data) %>% group_by(cluster) %>% summarise(umap1=median(latentumap_1), umap2=median(latentumap_2))
+
+cd8_seurat@reductions$latent_umap@cell.embeddings %>% as.data.frame %>% bind_cols(cd8_seurat@meta.data) %>%
+  ggplot(aes(latentumap_1,latentumap_2)) + stat_density_2d(aes(fill = ..level..), geom = "polygon") + facet_wrap(~timepoint) + scale_fill_distiller(direction=1) + theme(legend.position = "none") + theme_bw(base_size = 12) + theme(legend.position = "none") + labs(x = "UMAP 1", y = "UMAP 2") +
+  geom_text(data=median_df,aes(umap1,umap2,label=cluster))
+
+
+cd8_seurat@meta.data %>% 
+  group_by(orig.ident, timepoint,cluster) %>% summarise(n=n()) %>% mutate(prop=n/sum(n)) %>% 
+  ggplot(aes(timepoint,prop)) + geom_boxplot() + facet_wrap(~cluster, scales = "free_y") + ggpubr::stat_compare_means(label = "p.format")
+
+## Calculate maturation for each time point
+cd8_seurat_0m  <- subset(cd8_seurat, cells = subset(cd8_seurat, timepoint == "dg")$barcode)
+cd8_seurat_3m  <- subset(cd8_seurat, cells = subset(cd8_seurat, timepoint == "3mo")$barcode)
+cd8_seurat_12m <- subset(cd8_seurat, cells = subset(cd8_seurat, timepoint == "12mo")$barcode)
+
+cd8_0m_curve  <- as.SingleCellExperiment(cd8_seurat_0m) %>% slingshot(clusterLabels = 'cluster', reducedDim = "LATENT_UMAP", start.clus = "8 CD8 naive TCF7+") %>% SlingshotDataSet()
+cd8_3m_curve  <- as.SingleCellExperiment(cd8_seurat_3m) %>% slingshot(clusterLabels = 'cluster', reducedDim = "LATENT_UMAP", start.clus = "8 CD8 naive TCF7+") %>% SlingshotDataSet()
+cd8_12m_curve <- as.SingleCellExperiment(cd8_seurat_12m) %>% slingshot(clusterLabels = 'cluster', reducedDim = "LATENT_UMAP", start.clus = "8 CD8 naive TCF7+") %>% SlingshotDataSet()
+
+curve_cols    <- c("black", "darkred", "darkblue", "darkolivegreen4")
+
+cololors                <- cd8_seurat$cluster %>% extractClusterNumber() %>% as.numeric()
+cololors[cololors == 1] <- getPalette3(5)[1]
+cololors[cololors == 2] <- getPalette3(5)[2]
+cololors[cololors == 5] <- getPalette3(5)[3]
+cololors[cololors == 8] <- getPalette3(5)[4]
+cololors[cololors == 9] <- getPalette3(5)[5]
+
+# png("results/manuscript/dasatinib/umap_sling_nk.png", width = 6, height = 5, units = "in", res = 140) #, pointsize = 5, res = )
+plot(cd8_seurat@reductions$latent_umap@cell.embeddings, col = cololors, pch = 16, asp = 1)
+# text(0, 3, labels = "0 NK CD56dim")
+# text(0,-1.5, labels = "3 NK CD56dim HAVCR2+")
+# text(4,0.75, labels = "13 NK CD56bright")
+lines(cd8_0m_curve@curves[[1]], lwd = 4, col = curve_cols[1])
+
+lines(cd8_3m_curve@curves[[1]], lwd = 4, col = curve_cols[2])
+lines(cd8_3m_curve@curves[[2]], lwd = 4, col = curve_cols[2])
+lines(cd8_3m_curve@curves[[3]], lwd = 4, col = curve_cols[2])
+
+lines(cd8_12m_curve@curves[[1]], lwd = 4, col = curve_cols[3])
+lines(cd8_12m_curve@curves[[2]], lwd = 4, col = curve_cols[3])
+lines(cd8_12m_curve@curves[[3]], lwd = 4, col = curve_cols[3])
+
+dev.off()
+
+
+deg_all %>% filter(timepoint == "12mov3mo") %>% filter(gene %in% cytolytic)
+
+cd8_seurat@meta.data %>% 
+  ggplot(aes(timepoint,cytotoxicity1)) + geom_violin(draw_quantiles = 0.5) + facet_wrap(~cluster, scales = "free_y")
+
+
+####### CD8
+
+scg1 <- c("706", "716", "720", "730")
+clusters.to.rm <- c("14 CD8/B-cell doublet", "12 CD8 MAIT-like CXCR3+")
+
+cells.to.keep    <- cml_seurat@meta.data %>% 
+  # filter(grepl("CD8", cluster) | grepl("CD4", cluster) | grepl("T-cell", cluster) & !grepl("B-cell", cluster)) %>% 
+  filter(grepl("CD8", cluster)) %>% 
+  filter(!cluster %in% clusters.to.rm) %>% pull(barcode)
+cd8_seurat <- subset(cml_seurat, cells = cells.to.keep)
+cd8_seurat <- cd8_seurat %>% getLatentUMAP()
+
+## Density plot
+median_df <- cd8_seurat@reductions$latent_umap@cell.embeddings %>% as.data.frame %>% bind_cols(cd8_seurat@meta.data) %>% group_by(cluster) %>% summarise(umap1=median(latent_1), umap2=median(latent_2))
+
+cd8_seurat@reductions$latent_umap@cell.embeddings %>% as.data.frame %>% bind_cols(cd8_seurat@meta.data) %>%
+  ggplot(aes(latent_1,latent_2)) + 
+  stat_density_2d(aes(fill = ..level..), color="gray50", geom = "polygon") + 
+  #  ggalt::geom_encircle(aes(group=cluster), expand=1e-8) +
+  stat_ellipse(aes(group=cluster,color=cluster),linetype="dashed",type = "norm", segments = 10, size = 0.5) +
+  facet_wrap(~timepoint) + scale_fill_distiller(direction=1) + theme(legend.position = "none") + 
+  # theme_bw(base_size = 12) + 
+  theme_classic(base_size = 15) + 
+  
+  theme(legend.position = "right") + labs(x = "UMAP 1", y = "UMAP 2") +
+  ggrepel::geom_label_repel(data=median_df,aes(umap1,umap2,label=cluster,color=cluster), min.segment.length = 1, nudge_y = 5.5, nudge_x = 1, force = 3, size = 5) + 
+  facets_nice + scale_color_manual(values = getPalette(10)) + ylim(values = c(-4,8))
+ggsave("results/manuscript/ifna/umap_dens_cd8.pdf", width = 14, height = 5)
+
+
+## Remove the naive cluster
+cells.to.keep    <- cml_seurat@meta.data %>% 
+  # filter(grepl("CD8", cluster) | grepl("CD4", cluster) | grepl("T-cell", cluster) & !grepl("B-cell", cluster)) %>% 
+  filter(grepl("CD8", cluster)) %>% 
+  filter(!cluster %in% c(clusters.to.rm, "8 CD8 naive TCF7+")) %>% pull(barcode)
+cd8_seurat2 <- subset(cml_seurat, cells = cells.to.keep) %>% getLatentUMAP()
+cd8_seurat2 <- cd8_seurat2 %>% getLatentClustering()
+
+DimPlot(cd8_seurat2, split.by = "timepoint")
+
+## slingshot without naive
+sce    <- cd8_seurat2 %>% as.SingleCellExperiment %>% slingshot(clusterLabels = 'cluster', reducedDim = "LATENT_UMAP", start.clus = "1 CD8 EM GZMK+ CXCR3+") %>% SlingshotDataSet
+curves <- slingshot(sce)
+
+cololors                <- cd8_seurat2$cluster %>% extractClusterNumber() %>% as.numeric()
+cololors[cololors == 1] <- getPalette5(8)[1]
+# cololors[cololors == 2] <- getPalette5(8)[2]
+# cololors[cololors == 5] <- getPalette5(8)[3]
+# cololors[cololors == 9] <- getPalette5(8)[4]
+
+cololors[cololors == 2] <- NA
+cololors[cololors == 5] <- NA
+cololors[cololors == 9] <- NA
+
+plot(cd8_seurat2@reductions$latent_umap@cell.embeddings, col = cololors, pch = 16, asp = 1, main = "Healthy")
+lines(curves@curves[[1]], lwd = 4, col = getPalette(20)[1])
+
+
+
+
+############# Clonotype
+
+
+
+
+
+Idents(clonotype_seurat) %>% unique()
+curves <- lapply(top_clonotypes, getSlingClonotype, seurat_object = clonotype_seurat)
+
+cololors                <- clonotype_seurat$cluster %>% extractClusterNumber() %>% as.numeric()
+cololors[cololors == 1] <- getPalette5(8)[1]
+cololors[cololors == 2] <- getPalette5(8)[2]
+cololors[cololors == 5] <- getPalette5(8)[3]
+cololors[cololors == 8] <- getPalette5(8)[4]
+cololors[cololors == 9] <- getPalette5(8)[4]
+
+plot(clonotype_seurat@reductions$latent_umap@cell.embeddings, col = cololors, pch = 16, asp = 1, main = "Healthy")
+for(i in 1:20){lines(curves[[i]]@curves[[1]], lwd = 4, col = getPalette(20)[i])}
+
+
+
+png("results/manuscript/tcr/sling_clonotype.png", width = 1024, height = 1024)
+par(mfrow=c(4,5))
+for(i in 1:length(curves)){
+  
+  message(i)
+  colors      <- colorRampPalette(brewer.pal(11,'RdYlBu'))(100)
+  sling_curve <- SlingshotDataSet(curves[[i]])
+  
+  plot(clonotype_seurat@reductions$latent_umap@cell.embeddings, pch = 16, asp = 1, col = "gray90", main = top_clonotypes[i])
+  #  points(reducedDims(curves[[i]])[["LATENT_UMAP"]], col = colors[cut(curves[[i]]$slingPseudotime_1,breaks=100)], pch=16, asp = 1)
+  # points(reducedDims(curves[[i]]), col = colors[cut(curves[[i]]$slingPseudotime_1,breaks=100)], pch=16, asp = 1)
+  
+  for(j in 1:length(sling_curve@curves)){
+    lines(sling_curve@curves[[j]], lwd = 4, col = curve_cols[i])
+  }
+  
+}
+dev.off()

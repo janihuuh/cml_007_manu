@@ -1,0 +1,22 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1604776269476.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "4244018507",
+    "id" : "45CEE4D0",
+    "lastKnownWriteTime" : 1602591587,
+    "last_content_update" : 1602591587,
+    "path" : "~/Dropbox (HRUH)/NordCML/src/R/helper/fun_helper.R",
+    "project_path" : null,
+    "properties" : {
+        "cursorPosition" : "1382,0",
+        "scrollLine" : "0"
+    },
+    "relative_order" : 8,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

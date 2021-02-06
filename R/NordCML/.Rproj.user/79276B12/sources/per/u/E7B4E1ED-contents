@@ -1,0 +1,4 @@
+
+DimPlot(nk_dasa_seurat, label = T, split.by = "timepoint")
+
+FeaturePlot()

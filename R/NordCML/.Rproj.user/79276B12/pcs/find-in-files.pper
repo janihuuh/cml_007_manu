@@ -1,0 +1,10 @@
+{
+    "dialog-state" : {
+        "caseSensitive" : false,
+        "filePatterns" : [
+        ],
+        "path" : "~/Dropbox (HRUH)/NordCML/src/R",
+        "query" : "hallmark_ifna1",
+        "regex" : false
+    }
+}

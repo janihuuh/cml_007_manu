@@ -1,0 +1,22 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1604774725402.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "2237117840",
+    "id" : "6BA31D2",
+    "lastKnownWriteTime" : 1604774750,
+    "last_content_update" : 1604774750281,
+    "path" : "~/Dropbox (HRUH)/NordCML/src/R/main.R",
+    "project_path" : null,
+    "properties" : {
+        "cursorPosition" : "12,0",
+        "scrollLine" : "0"
+    },
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

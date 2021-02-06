@@ -1,0 +1,30 @@
+
+ifna_hallmark <- fread("results/manuscript/ifna/hallmark_ifna.txt")[-1,]
+
+FeaturePlot(cml_seurat, reduction = "umap", features = "hallmark_ifna1", cols = c(low = cols[9], mid = cols[4], high = cols[1]), order = T, min.cutoff = 0.25, max.cutoff = 2.5, label = F, repel = T, pt.size = 0.5) + theme_bw(base_size = 12)
+ggsave("results/manuscript/ifna/umap_ifna_score.png", width = 5, height = 4)
+
+
+cols <- brewer.pal(9, "RdYlBu")
+FeaturePlot(cml_seurat, reduction = "umap", features = "hallmark_ifna1", cols = c(low = cols[9], mid = cols[4], high = cols[1]), order = T, min.cutoff = 0.25, max.cutoff = 2.5, label = F, repel = T, pt.size = 0.5) + theme_classic(base_size = 15) + labs(x = "UMAP 1", y = "UMAP 2", color = "IFNa score", title = "")
+ggsave("results/manuscript/ifna/umap_ifna_score.png", width = 5, height = 4)
+
+
+cml_seurat@reductions$latent_umap@cell.embeddings %>% bind_cols(cml_seurat@meta.data) %>% head
+
+data.frame(cml_seurat@reductions$latent_umap@cell.embeddings, cml_seurat@meta.data) %>% 
+  ggplot(aes(latent1,latent2)) + geom_point()
+
+df <- cml_seurat@reductions$umap@cell.embeddings %>% as.data.frame %>% bind_cols(cml_seurat@meta.data) 
+median_df <- cml_seurat@reductions$umap@cell.embeddings %>% as.data.frame %>% bind_cols(cml_seurat@meta.data) %>% group_by(celltype) %>% summarise(umap1=median(UMAP_1), umap2=median(UMAP_2))
+
+df$hallmark_ifna1
+df %>% ggplot(aes(UMAP_1,UMAP_2)) + 
+  geom_point(aes(color = hallmark_ifna1)) 
+  
+stat_ellipse(aes(group=celltype,color=celltype), linetype="dashed",type = "norm", segments = 10, size = 0.5) +
+  # scale_color_distiller(direction=1) + 
+  theme(legend.position = "none") + theme_classic(base_size = 20) + theme(legend.position = "none") + labs(x = "UMAP 1", y = "UMAP 2") +
+  ggrepel::geom_label_repel(data=median_df,aes(umap1,umap2,label=celltype,color=celltype), min.segment.length = 1, nudge_y = 5, size = 6) + 
+  facets_nice + scale_color_manual(values = getPalette(9)) #+ ylim(values = c(-4,8))
+ggsave("results/manuscript/overall/umap_dens_timepoint.pdf", width = 12, height = 5)
